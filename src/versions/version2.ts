@@ -1,18 +1,18 @@
 import moment from 'moment'
-import { ErrorMessage, IShopeeAPI, ResultData, ShopeeAPIConfig } from '@utils/contains'
+import { ErrorMessage, GetOrderListOptions, IShopeeAPI, OrderResponseOptionalField, OrderStatus, ResultData, ShopeeAPIConfig, TimeRangeField } from '@utils/contains'
 import crypto from 'crypto'
-import axios, { AxiosRequestConfig, AxiosResponse } from 'axios'
-// eslint-disable-next-line n/no-deprecated-api
-import { isNullOrUndefined } from 'util'
+import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios'
 import { isNativeError } from 'util/types'
 // eslint-disable-next-line no-unused-vars
 import _async from 'async'
 // eslint-disable-next-line camelcase
-import { tryFunctionTime } from '@utils/common'
+import { splitDate, tryFunctionTime } from '@utils/common'
 
 export class ShopeeApiV2 implements IShopeeAPI {
+  /** Config of this class */
   config: ShopeeAPIConfig
 
+  /** Prefix of api */
   commonApiPath: string
   constructor (config: ShopeeAPIConfig) {
     if (config === null || config === undefined) {
@@ -32,6 +32,11 @@ export class ShopeeApiV2 implements IShopeeAPI {
     this.commonApiPath = `/${this.config.apiPrefix}/${this.config.version}`
   }
 
+  /**
+   * Get base URL of server
+   * @param includeAPIPath with api prefix or not
+   * @returns String
+   */
   getBaseUrl = (includeAPIPath: boolean = true) => {
     return `https://partner${
       !this.config.isReal ? '.test-stable' : ''
@@ -40,6 +45,12 @@ export class ShopeeApiV2 implements IShopeeAPI {
     }`
   }
 
+  /**
+   * Build a Signature for API request
+   * @param data This is a object with key and value
+   * @param order Which key is map first or next to right with condition
+   * @returns Info about Signature
+   */
   buildSignature = (data: Record<string, any>, order?: string[]) => {
     let stringToCrypto = ''
     if (!data) return stringToCrypto
@@ -64,6 +75,12 @@ export class ShopeeApiV2 implements IShopeeAPI {
     return signature
   }
 
+  /**
+   * Build a simple Signature without timestamp
+   * @param apiPath API path
+   * @param args everything after but not include timestamp
+   * @returns Signature info
+   */
   buildSignatureSimple = (apiPath = '', ...args: any[]) => {
     const timestamp = Math.round(Date.now() / 1000)
     const signature = crypto
@@ -76,12 +93,23 @@ export class ShopeeApiV2 implements IShopeeAPI {
     }
   }
 
-  LOG = (msg: string, ...args:any[]) => {
+  /**
+   * Log info to console
+   * @param args Everything
+   */
+  LOG = (...args:any[]) => {
     if (this.config.showMoreLog) {
-      console.log(msg, args)
+      args.forEach(element => {
+        console.log(element)
+      })
     }
   }
 
+  /**
+   * Build a link to client can connect with Dev App
+   * @param isCancel Is cancel connect with APP?
+   * @returns Link to authenticate with client
+   */
   buildAuthURL = (isCancel = false) => {
     const host = this.getBaseUrl(false)
     const path = `${this.commonApiPath}/shop/${isCancel ? 'cancel_auth_partner' : 'auth_partner'}`
@@ -98,6 +126,11 @@ export class ShopeeApiV2 implements IShopeeAPI {
     return authUrl
   }
 
+  /**
+   * Get access token with callback code when client authentication done
+   * @param code Code after client authentication with buildAuthURL
+   * @returns Access token data
+   */
   getAccessToken = async (code : string) => {
     const path = `/${this.config.apiPrefix}/${this.config.version}/auth/token/get`
     const timestamp = Math.round(Date.now() / 1000)
@@ -128,6 +161,10 @@ export class ShopeeApiV2 implements IShopeeAPI {
     return responseTokenData
   }
 
+  /**
+   * Reset access token in this class if existed
+   * @returns New access token
+   */
   refreshAccessToken = async () => {
     const path = `/${this.config.apiPrefix}/${this.config.version}/auth/access_token/get`
     const timestamp = Math.round(Date.now() / 1000)
@@ -158,6 +195,14 @@ export class ShopeeApiV2 implements IShopeeAPI {
     return responseTokenData
   }
 
+  /**
+   * Make a request to server
+   * @param endpoint Endpoint of URL
+   * @param data JSON data (Just a object)
+   * @param method Allow method is support
+   * @param options Option for request
+   * @returns Promise
+   */
   makeRequest = async (
     endpoint: string,
     data: any,
@@ -210,7 +255,7 @@ export class ShopeeApiV2 implements IShopeeAPI {
       baseURL: this.getBaseUrl(false),
       url: (options.withApiPath ? this.commonApiPath : '') + endpoint,
       method: method.toUpperCase() || 'POST',
-      params: options.params,
+      params: method.toUpperCase() === 'GET' ? data ? { ...data, ...options.params } : options.params : {},
       data: method.toUpperCase() !== 'GET' ? data : {}
     }
     const promise = new Promise<{ body: any; res: AxiosResponse }>(function (
@@ -235,44 +280,99 @@ export class ShopeeApiV2 implements IShopeeAPI {
     return promise
   }
 
+  /**
+   * Make a post request
+   * @param endpoint Endpoint of URL
+   * @param data JSON data (Just a object)
+   * @param method Allow method is support
+   * @param options Option for request
+   * @returns Promise
+   */
   post = (endpoint: string, data : null | Record<string, any> = null, options?:Record<string, any>) => {
     return this.makeRequest(endpoint, data, 'POST', options)
   }
 
+  /**
+   * Make a get request
+   * @param endpoint Endpoint of URL
+   * @param data JSON data (Just a object)
+   * @param method Allow method is support
+   * @param options Option for request
+   * @returns Promise
+   */
   get = (endpoint: string, data = null, options?:Record<string, any>) => {
     return this.makeRequest(endpoint, data, 'GET', options)
   }
 
-  getOrders = async (dateFrom: Date, dateTo: Date, options?:{retryTime?: number}) : Promise<any[] | ErrorMessage> => {
+  /**
+   * Get order data (This API is limit 15 day of dateFrom to dateTo)
+   * @param dateFrom Date
+   * @param dateTo Date
+   * @param options option for the request
+   * @returns List of order
+   */
+  public getOrders = async (dateFrom: Date, dateTo: Date, options?:GetOrderListOptions) : Promise<any[] | ErrorMessage> => {
     type tryFuncResponse = {
       body: any;
       res: AxiosResponse;
-  }
+    }
+
+    const optionsDefault:GetOrderListOptions = {
+      retryTime: 2,
+      searchOptions: {
+        time_range_field: TimeRangeField.create_time,
+        page_size: 20,
+        cursor: '',
+        order_status: OrderStatus.READY_TO_SHIP,
+        response_optional_fields: OrderResponseOptionalField.order_status
+      }
+    }
+
+    options = { ...optionsDefault, ...options, searchOptions: { ...optionsDefault.searchOptions, ...options?.searchOptions } }
+
     let lsOrder: any[] = []
     let more = true
     const search = {
-      create_time_from: Math.floor(dateFrom.getTime() / 1000),
-      create_time_to: Math.floor(dateTo.getTime() / 1000),
-      pagination_entries_per_page: 100,
-      pagination_offset: 0
+      time_from: Math.floor(dateFrom.getTime() / 1000),
+      time_to: Math.floor(dateTo.getTime() / 1000),
+      ...options.searchOptions
     }
     do {
       const tryFunc = async () : Promise<tryFuncResponse | ErrorMessage> => {
         try {
+          const pathApi = '/order/get_order_list'
+          const path = `${this.commonApiPath}${pathApi}`
+          const signatureOptions = {
+            partner_id: this.config.partner_id,
+            path,
+            timestamp: Math.round(Date.now() / 1000),
+            access_token: this.config.tokenData?.access_token,
+            shop_id: this.config.shopId
+          }
+          const sign = this.buildSignature(signatureOptions)
           const response = await this.makeRequest(
-            '/orders/basics',
-            search,
-            'POST'
+            pathApi,
+            {
+              ...search,
+              ...{
+                partner_id: this.config.partner_id,
+                shop_id: this.config.shopId,
+                access_token: this.config.tokenData?.access_token,
+                sign: typeof sign === 'string' ? sign : sign.sign,
+                timestamp: signatureOptions.timestamp
+              }
+            },
+            'GET'
           )
-          if (isNativeError(response)) {
+          if (isNativeError(response) || response instanceof AxiosError) {
             return response
           }
           if (response.body.error) {
             const error: ErrorMessage = new Error()
             error.code = response.body.error
             error.data = response.body
-            if (response.body.msg) {
-              switch (response.body.msg) {
+            if (response.body.message) {
+              switch (response.body.message) {
                 case 'partner and shop has no linked':
 
                   error.name = 'Shop của bạn chưa liên kết với hệ thống!'
@@ -287,7 +387,7 @@ export class ShopeeApiV2 implements IShopeeAPI {
                   break
 
                 default:
-                  error.message = response.body.msg
+                  error.message = response.body.message
                   break
               }
             } else {
@@ -300,21 +400,22 @@ export class ShopeeApiV2 implements IShopeeAPI {
           return err as ErrorMessage
         }
       }
-      const response = await tryFunctionTime<tryFuncResponse | ErrorMessage>(tryFunc, options?.retryTime || 2)
-      if (isNativeError(response)) {
-        this.LOG(`Search : ${search}, Error : ${response}`)
+      const response = await tryFunctionTime<tryFuncResponse | ErrorMessage>(tryFunc, options?.retryTime ?? 2)
+      if (isNativeError(response) || response instanceof AxiosError) {
+        this.LOG(`Search : ${search}, Error :`, response)
+        more = false
         continue
       }
-      if (isNullOrUndefined(response.body)) {
+      if (response.body === undefined || response.body === null) {
         more = false
       } else {
-        more = response.body.more
+        more = response.body.response?.more ?? false
       }
       if (response.body.error) {
         const error :ErrorMessage = new Error()
         error.code = response.body.error
         error.data = response.body
-        switch (response.body.msg) {
+        switch (response.body.message) {
           case 'partner and shop has no linked':
             error.name = 'Shop của bạn chưa liên kết với hệ thống!'
             error.message = `Vui lòng vào link này ${this.buildAuthURL()}"  và đăng nhập để hệ thống liên kết với Shop của bạn!`
@@ -329,10 +430,10 @@ export class ShopeeApiV2 implements IShopeeAPI {
         }
         return error
       }
-      lsOrder = lsOrder.concat(response.body.orders)
-      search.pagination_offset++
+      lsOrder = lsOrder.concat(response.body.response.order_list)
+      search.cursor = response.body.response.next_cursor
       this.LOG(
-      `getAllOrder : dateFrom : ${moment(dateFrom).format('dd/MM/yyyy')}, dateTo : ${moment(dateTo).format('dd/MM/yyyy')}, lsOrder : ${
+      `getOrders : dateFrom : ${moment(dateFrom).format('dd/MM/yyyy')}, dateTo : ${moment(dateTo).format('dd/MM/yyyy')}, lsOrder : ${
         lsOrder.length
       }`
       )
@@ -340,6 +441,30 @@ export class ShopeeApiV2 implements IShopeeAPI {
     return lsOrder
   }
 
+  getAllOrders = () => {
+    const localGetOrder = this.getOrders
+
+    const result = async function * (dateFrom: Date, dateTo: Date, options?:GetOrderListOptions) {
+      const listSplitDate = splitDate(dateFrom, dateTo, 15)
+      for (let i = 0; i < listSplitDate.length; i++) {
+        const dateData = listSplitDate[i]
+        const rsData = await localGetOrder(dateData.from, dateData.to, options)
+
+        if (!(rsData instanceof Error)) {
+          for (let j = 0; j < rsData.length; j++) {
+            const data = rsData[j]
+            yield data
+          }
+        }
+      }
+    }
+    return result
+  }
+
+  /**
+   * Get shop info
+   * @returns ShopInfo object
+   */
   getShopInfo = async ():Promise<ResultData> => {
     let result: ResultData = {
       success: false

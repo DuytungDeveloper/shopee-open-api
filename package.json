@@ -11,7 +11,8 @@
     "prepare": "yarn build & jest",
     "build": "tsc",
     "test": "jest",
-    "test-watch": "jest --watch"
+    "test-dev": "MODE=DEV yarn test",
+    "test-prod": "MODE=PROD yarn test"
   },
   "repository": {
     "type": "git",
@@ -38,6 +39,7 @@
     "@typescript-eslint/eslint-plugin": "^5.28.0",
     "@typescript-eslint/parser": "^5.28.0",
     "babel-jest": "^28.1.1",
+    "dotenv": "^16.0.1",
     "eslint": "^8.0.1",
     "eslint-config-standard": "^17.0.0",
     "eslint-plugin-import": "^2.25.2",

@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { AxiosResponse } from 'axios'
 
 // #region Enum
@@ -37,13 +38,45 @@ export type ShopeeAPIConfig = Record<string, any> & {
   webhook_url?: string;
   /** Show More log to debug */
   showMoreLog?: boolean;
-  tokenData?:{
-    refresh_token: string,
-    access_token: string,
-    expire_in: number,
-    expire_date:Date
+  tokenData?: {
+    refresh_token: string;
+    access_token: string;
+    expire_in: number;
+    expire_date: Date;
   };
 };
+
+export enum TimeRangeField {
+  create_time = 'create_time',
+  update_time = 'update_time',
+}
+
+export enum OrderResponseOptionalField {
+  order_status = 'order_status'
+}
+
+export enum OrderStatus {
+  UNPAID = 'UNPAID',
+  READY_TO_SHIP = 'READY_TO_SHIP',
+  PROCESSED = 'PROCESSED',
+  SHIPPED = 'SHIPPED',
+  COMPLETED = 'COMPLETED',
+  IN_CANCEL = 'IN_CANCEL',
+  CANCELLED = 'CANCELLED',
+  INVOICE_PENDING = 'INVOICE_PENDING',
+}
+
+export type GetOrderListOptions = {
+  retryTime?: number;
+  searchOptions?: {
+    time_range_field?: TimeRangeField;
+    order_status?:OrderStatus;
+    page_size?: number;
+    cursor?: string;
+    response_optional_fields?: OrderResponseOptionalField;
+  };
+};
+
 // #endregion
 
 // #region Interfaces
@@ -51,8 +84,8 @@ export interface IShopeeAPI {
   // #region Property
   /** Ex : /api/v2/ */
   commonApiPath?: string;
-  config:ShopeeAPIConfig;
-
+  config: ShopeeAPIConfig;
+  // #endregion
   /**
    * * Get base url of a server Ex : https://partner.shopeemobile.com
    * * includeAPI_Path : true => Ex : https://partner.shopeemobile.com/api/v2
@@ -80,10 +113,13 @@ export interface IShopeeAPI {
     data: any,
     method: 'POST' | 'GET' | 'PUT' | 'DELETE',
     options: Record<string, any>
-  ) => Promise<{
-    body: any;
-    res: AxiosResponse;
-} | ErrorMessage>;
+  ) => Promise<
+    | {
+        body: any;
+        res: AxiosResponse;
+      }
+    | ErrorMessage
+  >;
   post: (
     endpoint: string,
     data: any,
